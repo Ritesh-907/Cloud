@@ -4,6 +4,7 @@ const { body, validationResult } = require('express-validator');
 const rateLimit = require('express-rate-limit');
 const User = require('../models/User');
 const { authenticate } = require('../middleware/auth');
+const { clearAuthCookie, setAuthCookie } = require('../utils/authCookie');
 
 const router = express.Router();
 
@@ -20,6 +21,15 @@ const generateToken = (user) => {
     process.env.JWT_SECRET || 'fallback_secret',
     { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
   );
+};
+
+const sendAuthResponse = (res, statusCode, message, user, token, extra = {}) => {
+  setAuthCookie(res, token);
+  return res.status(statusCode).json({
+    message,
+    user,
+    ...extra
+  });
 };
 
 // POST /api/auth/register
@@ -41,11 +51,13 @@ router.post('/register', authLimiter, [
       // Demo mode: create fake token
       const fakeUser = { _id: 'demo_' + Date.now(), name, email, role: 'user' };
       const token = generateToken(fakeUser);
-      return res.status(201).json({
-        message: 'Demo mode: User registered (no DB)',
-        token,
-        user: { name, email, role: 'user', storageUsed: 0, storageLimit: 1073741824 }
-      });
+      return sendAuthResponse(
+        res,
+        201,
+        'Demo mode: User registered (no DB)',
+        { name, email, role: 'user', storageUsed: 0, storageLimit: 1073741824 },
+        token
+      );
     }
 
     const existing = await User.findOne({ email });
@@ -56,18 +68,20 @@ router.post('/register', authLimiter, [
     const user = await User.create({ name, email, password });
     const token = generateToken(user);
 
-    res.status(201).json({
-      message: 'Registration successful',
-      token,
-      user: {
+    return sendAuthResponse(
+      res,
+      201,
+      'Registration successful',
+      {
         id: user._id,
         name: user.name,
         email: user.email,
         role: user.role,
         storageUsed: user.storageUsed,
         storageLimit: user.storageLimit
-      }
-    });
+      },
+      token
+    );
   } catch (error) {
     next(error);
   }
@@ -90,11 +104,13 @@ router.post('/login', authLimiter, [
     if (!User.db || User.db.readyState !== 1) {
       const fakeUser = { _id: 'demo_user', name: 'Demo User', email, role: 'user' };
       const token = generateToken(fakeUser);
-      return res.json({
-        message: 'Demo login successful',
-        token,
-        user: { id: 'demo_user', name: 'Demo User', email, role: 'user', storageUsed: 0, storageLimit: 1073741824 }
-      });
+      return sendAuthResponse(
+        res,
+        200,
+        'Demo login successful',
+        { id: 'demo_user', name: 'Demo User', email, role: 'user', storageUsed: 0, storageLimit: 1073741824 },
+        token
+      );
     }
 
     const user = await User.findOne({ email }).select('+password');
@@ -111,10 +127,11 @@ router.post('/login', authLimiter, [
 
     const token = generateToken(user);
 
-    res.json({
-      message: 'Login successful',
-      token,
-      user: {
+    return sendAuthResponse(
+      res,
+      200,
+      'Login successful',
+      {
         id: user._id,
         name: user.name,
         email: user.email,
@@ -122,11 +139,18 @@ router.post('/login', authLimiter, [
         storageUsed: user.storageUsed,
         storageLimit: user.storageLimit,
         lastLogin: user.lastLogin
-      }
-    });
+      },
+      token
+    );
   } catch (error) {
     next(error);
   }
+});
+
+// POST /api/auth/logout
+router.post('/logout', (req, res) => {
+  clearAuthCookie(res);
+  res.json({ message: 'Logout successful' });
 });
 
 // GET /api/auth/me

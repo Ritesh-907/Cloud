@@ -1,7 +1,6 @@
 // Frontend application
 /* ── CloudVault Frontend App ─────────────────────────────────── */
 const API = '/api';
-let authToken = localStorage.getItem('cv_token');
 let currentUser = null;
 let currentView = 'all';
 let currentFolder = null;
@@ -17,7 +16,8 @@ let searchDebounce = null;
 async function api(method, path, data, isFormData = false) {
   const opts = {
     method,
-    headers: { Authorization: `Bearer ${authToken}` }
+    credentials: 'include',
+    headers: {}
   };
   if (data && !isFormData) {
     opts.headers['Content-Type'] = 'application/json';
@@ -27,8 +27,13 @@ async function api(method, path, data, isFormData = false) {
   }
   const res = await fetch(API + path, opts);
   const json = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(json.error || 'Request failed');
+  const message = typeof json.error === 'string' ? json.error : json.error?.message;
+  if (!res.ok) throw new Error(message || 'Request failed');
   return json;
+}
+
+function isAuthError(message = '') {
+  return /(authentication required|invalid token|token expired|inactive)/i.test(message);
 }
 
 function formatSize(bytes) {
@@ -115,10 +120,8 @@ document.getElementById('login-form').addEventListener('submit', async (e) => {
       email: document.getElementById('login-email').value,
       password: document.getElementById('login-password').value
     });
-    authToken = data.token;
     currentUser = data.user;
-    localStorage.setItem('cv_token', authToken);
-    showDashboard();
+    await showDashboard();
   } catch (err) {
     errorEl.textContent = err.message;
     errorEl.classList.remove('hidden');
@@ -136,10 +139,8 @@ document.getElementById('register-form').addEventListener('submit', async (e) =>
       email: document.getElementById('reg-email').value,
       password: document.getElementById('reg-password').value
     });
-    authToken = data.token;
     currentUser = data.user;
-    localStorage.setItem('cv_token', authToken);
-    showDashboard();
+    await showDashboard();
     toast('Welcome to CloudVault! 🎉', 'success');
   } catch (err) {
     errorEl.textContent = err.message;
@@ -152,13 +153,18 @@ function togglePassword(id) {
   input.type = input.type === 'password' ? 'text' : 'password';
 }
 
-function logout() {
-  authToken = null;
+function resetSessionState() {
   currentUser = null;
-  localStorage.removeItem('cv_token');
   document.getElementById('dashboard-page').classList.remove('active');
   document.getElementById('auth-page').classList.add('active');
   document.getElementById('user-dropdown').classList.remove('open');
+}
+
+async function logout() {
+  try {
+    await api('POST', '/auth/logout');
+  } catch {}
+  resetSessionState();
 }
 
 // ── Dashboard Init ───────────────────────────────────────────
@@ -166,7 +172,13 @@ async function showDashboard() {
   document.getElementById('auth-page').classList.remove('active');
   document.getElementById('dashboard-page').classList.add('active');
   if (!currentUser) {
-    try { const d = await api('GET', '/auth/me'); currentUser = d.user; } catch {}
+    try {
+      const d = await api('GET', '/auth/me');
+      currentUser = d.user;
+    } catch {
+      resetSessionState();
+      return;
+    }
   }
   updateUserUI();
   await Promise.all([loadFolders(), loadFiles()]);
@@ -318,7 +330,7 @@ async function loadFiles(searchQuery = '') {
   } catch (err) {
     loading.classList.add('hidden');
     console.error('Load files error:', err);
-    if (err.message.includes('Authentication')) logout();
+    if (isAuthError(err.message)) await logout();
   }
 }
 
@@ -708,14 +720,9 @@ document.addEventListener('keydown', e => {
 
 // ── Auto-init ────────────────────────────────────────────────
 (async () => {
-  if (authToken) {
-    try {
-      const d = await api('GET', '/auth/me');
-      currentUser = d.user;
-      showDashboard();
-    } catch {
-      authToken = null;
-      localStorage.removeItem('cv_token');
-    }
-  }
+  try {
+    const d = await api('GET', '/auth/me');
+    currentUser = d.user;
+    await showDashboard();
+  } catch {}
 })();

@@ -293,4 +293,4 @@ router.get('/stats/overview', authenticate, async (req, res, next) => {
   }
 });
 
-module.exports = router;  
+module.exports = router;
