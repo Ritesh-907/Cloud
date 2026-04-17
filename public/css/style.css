@@ -239,7 +239,7 @@ select option{background:var(--bg-3);color:var(--text)}
 .file-card{
   background:var(--bg-2);border:1px solid var(--border);border-radius:var(--radius);
   overflow:hidden;cursor:pointer;transition:var(--transition);
-  position:relative;group:true
+  position:relative
 }
 .file-card:hover{border-color:var(--border-hover);transform:translateY(-2px);box-shadow:var(--shadow)}
 .file-card .card-thumb{
